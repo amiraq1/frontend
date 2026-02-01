@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Nabd AI",
   description: "Native Engine V2.0",
+  other: {
+    google: "notranslate",
+  },
 };
 
 export default function RootLayout({
