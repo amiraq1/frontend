@@ -33,33 +33,88 @@ export default function Home() {
     if (!input.trim()) return;
 
     const userMsg: Message = { role: 'user', content: input, timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    // Create placeholder for assistant
+    const aiPlaceholder: Message = { role: 'assistant', content: "", timestamp: new Date() };
+
+    setMessages(prev => [...prev, userMsg, aiPlaceholder]);
     setInput('');
     setIsLoading(true);
 
     try {
-      // Call Backend API
       const res = await fetch('http://localhost:8000/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMsg.content })
       });
 
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      let fullContent = "";
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        const chunkValue = decoder.decode(value, { stream: true });
+
+        // Split by lines (SSE format: data: {...})
+        const lines = chunkValue.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.replace("data: ", "").trim();
+            if (jsonStr === "[DONE]") break;
+
+            try {
+              const data = JSON.parse(jsonStr);
+
+              // Update UI based on event type
+              setMessages(prev => {
+                const newMsgs = [...prev];
+                const lastMsg = newMsgs[newMsgs.length - 1];
+
+                if (lastMsg.role === 'assistant') {
+                  if (data.status) {
+                    // Show "Thinking..." logic or append log
+                    // For now, let's prepend status in italics or something, 
+                    // but for simplicity, we just won't show logs in the main text yet
+                    // OR we can show them temporarily.
+                    // Let's just update content if we have a result.
+                  }
+                  if (data.response) {
+                    // If we get a final response chunk (or full response if not token streaming yet)
+                    // Since our backend yields fully completed node results, we just replace.
+                    lastMsg.content = data.response;
+                  }
+                  if (data.error) {
+                    lastMsg.content += `\n❌ Error: ${data.error}`;
+                  }
+                }
+                return newMsgs;
+              });
+
+            } catch (e) {
+              console.error("Error parsing JSON update", e);
+            }
+          }
+        }
       }
 
-      const data = await res.json();
-
-      const aiMsg: Message = {
-        role: 'assistant',
-        content: data.response || "لم يتم استلام رد.",
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, aiMsg]);
     } catch (err) {
       console.error(err);
-      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ خطأ في الاتصال بالخادم. هل المنفذ 8000 يعمل؟", timestamp: new Date() }]);
+      setMessages(prev => {
+        const newMsgs = [...prev];
+        const lastMsg = newMsgs[newMsgs.length - 1];
+        // If we failed before adding placeholder, we should add one. 
+        // But we added one at start.
+        if (lastMsg.role === 'assistant') {
+          lastMsg.content = "⚠️ خطأ في الاتصال بالخادم.";
+        }
+        return newMsgs;
+      });
     } finally {
       setIsLoading(false);
     }
